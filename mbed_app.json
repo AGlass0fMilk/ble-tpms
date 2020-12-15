@@ -1,0 +1,28 @@
+{
+    "target_overrides": {
+        "*": {
+            "mbed-trace.enable"                         : true,
+            "platform.stdio-baud-rate"                  : 115200,
+            "platform.stdio-convert-newlines"           : true,
+            "platform.stdio-buffered-serial"            : true,
+            "target.printf_lib"                         : "std",
+            "target.enable-objects-extensions"          : true,
+            "tcan4551.default-tcan-mosi"                : "P0_15",
+            "tcan4551.default-tcan-miso"                : "P0_8",
+            "tcan4551.default-tcan-sclk"                : "P0_6",
+            "tcan4551.default-tcan-csn"                 : "P0_5",
+            "tcan4551.default-tcan-nint"                : "P0_30",
+            "tcan4551.default-tcan-rst"                 : "NC",
+            "tcan4551.default-tcan-wake-ctl"            : "NC",
+            "ble.ble-feature-gatt-client"               : false,
+            "ble.ble-feature-security"                  : false,
+            "ble.ble-feature-secure-connections"        : false,
+            "ble.ble-feature-signing"                   : false,
+            "ble.ble-feature-whitelist"                 : false,
+            "ble.ble-feature-privacy"                   : false,
+            "ble.ble-feature-extended-advertising"      : false,
+            "ble.ble-feature-periodic-advertising"      : false,
+            "ble.ble-security-database-filesystem"      : false
+        }
+    }
+}

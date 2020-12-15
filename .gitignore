@@ -1,0 +1,11 @@
+.cproject
+.mbed
+.project
+.settings/*
+BUILD/*
+GettingStarted.html
+__pycache__/*
+makefile.targets
+*~
+mbed_config.h
+mbed_settings.*
