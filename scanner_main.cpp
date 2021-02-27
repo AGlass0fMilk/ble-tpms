@@ -51,6 +51,8 @@ mbed::DigitalOut led1(LED1, 1);
 mbed::Timeout retransmit_delay;
 volatile bool retransmit_flag = true;
 
+static int tpms_can_filter_handle = 0;
+
 /** Demonstrate advertising, scanning and connecting
  */
 class GapScanner : private mbed::NonCopyable<GapScanner>, public TPMSScanner
@@ -194,14 +196,14 @@ void handle_tpms(const TPMSScanner::TPMSPacket &packet) {
                 MAC_TO_CAN_ID(packet.get_mac_addr()),
                 data, 8, CANData, CANExtended);
 
-//        can_bus.write(msg);
-//
-//        /* Delay retransmission
-//         * TODO - make this dependent on received TPMS CAN messages
-//         */
-//        retransmit_delay.attach(mbed::Callback<void(void)>([&](){
-//            retransmit_flag = true;
-//        }), 1000ms);
+        can_bus.write(msg);
+
+        /* Delay retransmission
+         * TODO - make this dependent on received TPMS CAN messages
+         */
+        retransmit_delay.attach(mbed::Callback<void(void)>([&](){
+            retransmit_flag = true;
+        }), 1000ms);
     }
 #endif
 }
@@ -224,6 +226,15 @@ char* trace_prefix(size_t sz) {
     return prefix;
 }
 
+void handle_can_rx() {
+    tr_info("handling received CAN message...");
+    mbed::CANMessage msg;
+    if(can_bus.read(msg, tpms_can_filter_handle)) {
+        /* We want to avoid retransmitting packets sent out by other receivers on the same bus */
+
+    }
+}
+
 int main()
 {
 
@@ -233,15 +244,16 @@ int main()
     mbed_trace_prefix_function_set(trace_prefix);
     mbed_trace_init();
 
+    /* Add a filter for other BLE TPMS  receiver CAN packets */
+    tpms_can_filter_handle = can_bus.filter(BLE_TPMS_BASE_ADDR, BLE_TPMS_BASE_ADDR_MASK, CANExtended, 0);
+
+    /* Attach interrupt handler for CAN RX events */
+    can_bus.attach(mbed::callback([&]() {
+        event_queue.call(handle_can_rx);
+    }));
+
     BLE &ble = BLE::Instance();
 
-    // TODO - remove this ping
-    event_queue.call_every(10s, [](){
-        tr_info("ping");
-    });
-
-    /* this will inform us off all events so we can schedule their handling
-     * using our event queue */
     ble.onEventsToProcess(schedule_ble_events);
 
     GapScanner scanner(ble, event_queue);
