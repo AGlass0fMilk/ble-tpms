@@ -18,8 +18,19 @@
 // TODO look into CMAKE build system
 // This may enable building the main app, tester app, and bootloader from the same repository...
 
+/**
+ * - TODO finish retransmit delay logic
+ * - TODO test retransmit delay logic
+ * - TODO possibly reformat CAN packet so it has full MAC address
+ * - TODO create class for CAN packet
+ * - TODO add bootloader for in-place updates
+ * - TODO CAN bus control packets (go to sleep, firmware updates, etc)
+ * - TODO make this whole main into a class
+ */
+
 #if !MBED_CONF_APP_TESTER_BUILD
 
+#include <list>
 #include <events/mbed_events.h>
 #include "drivers/DigitalOut.h"
 #include "drivers/Timeout.h"
@@ -52,6 +63,9 @@ mbed::Timeout retransmit_delay;
 volatile bool retransmit_flag = true;
 
 static int tpms_can_filter_handle = 0;
+
+/* List of recently-received addresses */
+std::list<ble::address_t> recently_received;
 
 /** Demonstrate advertising, scanning and connecting
  */
@@ -232,6 +246,14 @@ void handle_can_rx() {
     if(can_bus.read(msg, tpms_can_filter_handle)) {
         /* We want to avoid retransmitting packets sent out by other receivers on the same bus */
 
+        // TODO test this!
+        uint8_t mac_address[6] = { 0x0, 0x0, 0x0, ((msg.id & 0xFF00) >> 8), (msg.id & 0xFF), msg.data[0]};
+        recently_received.push_back(ble::address_t(mac_address));
+        event_queue.call_in(RETRANSMIT_DELAY, mbed::callback([&]() {
+            tr_debug("removing %02x:%02x:%02x:%02x:%02x:%02x from recently received list...",
+                    addr[5], addr[4], addr[3], addr[2], addr[1], addr[0]);
+            recently_received.remove(ble::address_t(mac_address));
+        }));
     }
 }
 
