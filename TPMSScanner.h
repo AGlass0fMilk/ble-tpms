@@ -24,10 +24,14 @@
 #include "platform/Span.h"
 #include "platform/Callback.h"
 
-#include "drivers/Timeout.h"
+#include "drivers/Timer.h"
 
 #include <list>
 #include <math.h>
+
+#ifndef MBED_CONF_TPMS_SCANNER_RETRANSMIT_TIMEOUT
+#define MBED_CONF_TPMS_SCANNER_RETRANSMIT_TIMEOUT 1s
+#endif
 
 class TPMSScanner : public ble::Gap::EventHandler
 {
@@ -170,13 +174,21 @@ protected:
 
     public:
 
-        TPMSPeer(ble::address_t address);
-
-
-
-        volatile bool is_delay_expired() const {
-            return _delay_expired;
+        TPMSPeer(ble::address_t address) : _mac_addr(address) {
         }
+
+        /* Equivalency is based on MAC addresses */
+        bool operator==(const TPMSPeer& rhs) const {
+            return (this->_mac_addr == rhs._mac_addr);
+        }
+
+        const ble::address_t& get_mac_addr() const {
+            return _mac_addr;
+        }
+
+        void start_delay();
+
+        bool is_delay_expired() const;
 
     private:
 
@@ -190,9 +202,7 @@ protected:
          * This timeout prevents duplicate packets from propagating
          * to the rest of the application
          */
-        mbed::Timeout _retransmit_timeout;
-
-        volatile bool _delay_expired = true;
+        mbed::Timer _retransmit_timer;
 
     };
 
@@ -231,8 +241,8 @@ protected:
 
     mbed::Callback<void(const TPMSPacket&)> _cb = nullptr;
 
-    /* List containing MAC addresses of nearby BLE TPMS beacons */
-    std::list<ble::address_t> _tpms_macs;
+    /* List containing nearby BLE TPMS beacons */
+    std::list<TPMSPeer> _tpms_peers;
 
 
 };

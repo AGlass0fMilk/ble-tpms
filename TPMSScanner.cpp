@@ -21,11 +21,15 @@
 
 #include "mbed_trace.h"
 
+#include <chrono>
+
 #define TRACE_GROUP "tpms"
 
 #define LIMIT_SIZE(x, y) ((x > y)? y : x)
 
 #define TPMS_MAX_NAME_LENGTH 16
+
+using namespace std::chrono;
 
 TPMSScanner::TPMSPacket::TPMSPacket(mbed::Span<const uint8_t> manufacturer_data) {
     _mac_addr[5] = manufacturer_data[2];
@@ -66,6 +70,17 @@ TPMSScanner::TPMSPacket::TPMSPacket(ble::address_t addr, uint32_t pressure,
 
 }
 
+void TPMSScanner::TPMSPeer::start_delay() {
+    _retransmit_timer.reset();
+    _retransmit_timer.start();
+}
+
+bool TPMSScanner::TPMSPeer::is_delay_expired() const {
+    /* Returns true if the timer has elapsed or hasn't been started (new peer) */
+    return ((_retransmit_timer.elapsed_time() >= MBED_CONF_TPMS_SCANNER_RETRANSMIT_TIMEOUT) ||
+           ((_retransmit_timer.elapsed_time() == microseconds::zero())));
+}
+
 
 TPMSScanner::TPMSScanner(BLE &ble) : _ble(ble) {
 }
@@ -85,7 +100,7 @@ void TPMSScanner::start(mbed::Callback<void(const TPMSPacket&)> cb) {
 }
 
 void TPMSScanner::stop() {
-    _tpms_macs.clear();
+    _tpms_peers.clear();
     _cb = nullptr;
 }
 
@@ -113,8 +128,8 @@ void TPMSScanner::onAdvertisingReport(const ble::AdvertisingReportEvent &event)
 
                 /* See if we've already added this TPMS beacon to our list */
                 bool unique = true;
-                for(auto it = _tpms_macs.begin(); it != _tpms_macs.end(); ++it) {
-                    if (addr == *it) {
+                for(auto it = _tpms_peers.begin(); it != _tpms_peers.end(); ++it) {
+                    if (addr == it->get_mac_addr()) {
                         unique = false;
                         break;
                     }
@@ -128,7 +143,7 @@ void TPMSScanner::onAdvertisingReport(const ble::AdvertisingReportEvent &event)
                             event.getPeerAddressType().value());
 
                     /* Add the MAC to our unique list of nearby TPMS beacon MAC addresses */
-                    _tpms_macs.push_front(addr);
+                    _tpms_peers.push_front(TPMSPeer(addr));
                 }
             }
         }
@@ -136,18 +151,24 @@ void TPMSScanner::onAdvertisingReport(const ble::AdvertisingReportEvent &event)
         /* Copy the manufacturer data */
         if (field.type == ble::adv_data_type_t::MANUFACTURER_SPECIFIC_DATA) {
             /* Check to see if the peer is a known BLE TPMS beacon */
-            for (auto it = _tpms_macs.begin(); it != _tpms_macs.end(); ++it) {
-                if (addr == *it) {
-                    TPMSPacket packet(field.value);
-                    tr_info(
-                            "(%02x:%02x:%02x:%02x:%02x:%02x) pressure: %lu Pa, temp: %02f C, battery voltage: %02f V",
-                            addr[5], addr[4], addr[3], addr[2], addr[1],
-                            addr[0], packet.get_tire_pressure(), (float) packet.get_tire_temperature()/100.0f,
-                            packet.get_battery_voltage());
+            for (auto it = _tpms_peers.begin(); it != _tpms_peers.end(); ++it) {
+                if (addr == it->get_mac_addr()) {
+                    /* Check if the retransmit delay has expired */
+                    if(it->is_delay_expired()) {
 
-                    /* Notify the application */
-                    _cb(packet);
-                    break;
+                        /* Reset the delay */
+                        it->start_delay();
+
+                        /* Notify the application */
+                        TPMSPacket packet(field.value);
+                        tr_info(
+                                "(%02x:%02x:%02x:%02x:%02x:%02x) pressure: %lu Pa, temp: %02f C, battery voltage: %02f V",
+                                addr[5], addr[4], addr[3], addr[2], addr[1],
+                                addr[0], packet.get_tire_pressure(), (float) packet.get_tire_temperature()/100.0f,
+                                packet.get_battery_voltage());
+                        _cb(packet);
+                        break;
+                    }
                 }
             }
         }
