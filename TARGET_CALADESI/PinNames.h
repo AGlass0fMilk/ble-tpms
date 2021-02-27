@@ -179,8 +179,15 @@ typedef enum {
     A4 = p30,
     A5 = p31,
 
+    TCAN4551_MOSI   = P0_15,
+    TCAN4551_MISO   = P0_8,
+    TCAN4551_SCLK   = P0_6,
+    TCAN4551_CSN    = P0_5,
+    TCAN4551_NINT   = P0_30,
+
     // Not connected
-    NC = (int)0xFFFFFFFF
+    NC = (int)0xFFFFFFFF,
+
 } PinName;
 
 typedef enum {

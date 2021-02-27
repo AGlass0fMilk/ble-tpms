@@ -1,5 +1,6 @@
-/* mbed Microcontroller Library
- * Copyright (c) 2006-2018 ARM Limited
+/*
+ * Copyright (c) 2020 George Beckstein
+ * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -11,11 +12,15 @@
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
- * limitations under the License.
+ * limitations under the License
  */
 
+// TODO look into CMAKE build system
+// This may enable building the main app, tester app, and bootloader from the same repository...
+
+#if !MBED_CONF_APP_TESTER_BUILD
+
 #include <events/mbed_events.h>
-#include "drivers/CAN.h"
 #include "drivers/DigitalOut.h"
 #include "drivers/Timeout.h"
 #include "platform/Callback.h"
@@ -24,55 +29,22 @@
 #include "ble/BLE.h"
 #include "ble/Gap.h"
 #include "mbed_trace.h"
-
+#include "config.h"
 #include <chrono>
-
+#include "rtos/Kernel.h"
 #include "TPMSScanner.h"
 
+#include "drivers/SPI.h"
+
+#include "TCAN4551.h"
+
 #define TRACE_GROUP "main"
-
-#define BLE_TPMS_BASE_ADDR 0x1FFA0000
-#define MAC_TO_CAN_ID(addr) (BLE_TPMS_BASE_ADDR | (addr[1] << 8) | addr[0])
-
-#define PASCALS_TO_PSI(x) (x * 0.000145038f)
-
-/**
- * Configuration preprocessors
- */
-
-/** Scan duration */
-#ifndef MBED_CONF_APP_SCAN_INTERVAL
-#define MBED_CONF_APP_SCAN_INTERVAL 800
-#endif
-
-/** Scan window, must be less than scan duration! */
-#ifndef MBED_CONF_APP_SCAN_WINDOW
-#define MBED_CONF_APP_SCAN_WINDOW 640
-#endif
-
-/**
- * Number of TPMS sensor IDs to store in the "recently-seen" cache
- * If a TPMS packet is transmitted by this OR another TPMS receiver on the CAN bus,
- * the ID will be cached and retranmissions will be prevented for a certain
- * period of time.
- *
- * Ideally, this is large enough to store the maximum number of sensors
- * you plan to use.
- */
-#define CACHE_SIZE 8
-
-/**
- * Delay before a given TPMS sensor ID is removed from the "recently-seen" cache.
- */
-#define RETRANSMIT_DELAY 1s
 
 using namespace std::chrono;
 
 events::EventQueue event_queue;
 
-/** CAN bus through TCAN4551 interface */
-mbed::CAN can_bus(MBED_CONF_TCAN4551_DEFAULT_TCAN_MISO,
-                  MBED_CONF_TCAN4551_DEFAULT_TCAN_MOSI);
+TCAN4551 can_bus(TCAN4551_MOSI, TCAN4551_MISO, TCAN4551_SCLK, TCAN4551_CSN, TCAN4551_NINT);
 
 mbed::DigitalOut led1(LED1, 1);
 
@@ -117,6 +89,10 @@ public:
 
         /* this will not return until shutdown */
         _event_queue.dispatch_forever();
+    }
+
+    void stop() {
+        _event_queue.break_dispatch();
     }
 
 private:
@@ -193,7 +169,7 @@ void schedule_ble_events(BLE::OnEventsToProcessCallbackContext *context) {
  * }
  */
 void handle_tpms(const TPMSScanner::TPMSPacket &packet) {
-
+#if defined(TARGET_CALADESI)
     if(retransmit_flag) {
         retransmit_flag = false;
         led1 = !led1;
@@ -217,15 +193,17 @@ void handle_tpms(const TPMSScanner::TPMSPacket &packet) {
         mbed::CANMessage msg(
                 MAC_TO_CAN_ID(packet.get_mac_addr()),
                 data, 8, CANData, CANExtended);
-        can_bus.write(msg);
 
-        /* Delay retransmission
-         * TODO - make this dependent on received TPMS CAN messages
-         */
-        retransmit_delay.attach(mbed::Callback<void(void)>([&](){
-            retransmit_flag = true;
-        }), 1000ms);
+//        can_bus.write(msg);
+//
+//        /* Delay retransmission
+//         * TODO - make this dependent on received TPMS CAN messages
+//         */
+//        retransmit_delay.attach(mbed::Callback<void(void)>([&](){
+//            retransmit_flag = true;
+//        }), 1000ms);
     }
+#endif
 }
 
 static PlatformMutex mutex;
@@ -237,22 +215,54 @@ void mutex_release(void) {
     mutex.unlock();
 }
 
+/**
+ * Trace Prefix Format
+ */
+char* trace_prefix(size_t sz) {
+    static char prefix[16];
+    snprintf(prefix, 16, "[%llu]", rtos::Kernel::Clock::now());
+    return prefix;
+}
+
 int main()
 {
 
     /* Initialize trace */
     mbed_trace_mutex_wait_function_set(mutex_wait);
     mbed_trace_mutex_release_function_set(mutex_release);
+    mbed_trace_prefix_function_set(trace_prefix);
     mbed_trace_init();
 
     BLE &ble = BLE::Instance();
+
+    // TODO - remove this ping
+    event_queue.call_every(10s, [](){
+        tr_info("ping");
+    });
 
     /* this will inform us off all events so we can schedule their handling
      * using our event queue */
     ble.onEventsToProcess(schedule_ble_events);
 
     GapScanner scanner(ble, event_queue);
+
+    // TODO remove this -- proper way of shutting down
+    //event_queue.call_in(4min, mbed::callback(&scanner, &GapScanner::stop));
+
     scanner.run(mbed::callback(handle_tpms));
+
+    /*
+     * Go to sleep
+     * Since the TCAN455x powers the MCU from its internal LDO, this will
+     * power down the MCU as well.
+     */
+    //can_bus.sleep();
+
+    /* Spin until we're asleep :) */
+//    while(true) {
+//    }
 
     return 0;
 }
+
+#endif
