@@ -27,8 +27,14 @@
 
 #define TPMS_MAX_NAME_LENGTH 16
 
-TPMSScanner::TPMSPacket::TPMSPacket(ble::address_t addr,
-        mbed::Span<const uint8_t> manufacturer_data) : _mac_addr(addr) {
+TPMSScanner::TPMSPacket::TPMSPacket(mbed::Span<const uint8_t> manufacturer_data) {
+    _mac_addr[5] = manufacturer_data[2];
+    _mac_addr[4] = manufacturer_data[3];
+    _mac_addr[3] = manufacturer_data[4];
+    _mac_addr[2] = manufacturer_data[5];
+    _mac_addr[1] = manufacturer_data[6];
+    _mac_addr[0] = manufacturer_data[7];
+    memcpy(_payload, manufacturer_data.data(), sizeof(_payload));
     uint32_t *tire_pressure;
     int32_t *tire_temperature;
     tire_pressure = (uint32_t*)&manufacturer_data[8];
@@ -36,7 +42,30 @@ TPMSScanner::TPMSPacket::TPMSPacket(ble::address_t addr,
     _tire_pressure = *tire_pressure;
     _tire_temperature = *tire_temperature;
     _battery_voltage = convert_battery_voltage(manufacturer_data[16]);
+    _payload_span = mbed::make_const_Span(_payload);
 }
+
+TPMSScanner::TPMSPacket::TPMSPacket(ble::address_t addr, uint32_t pressure,
+        int32_t temp, uint8_t bat) : _mac_addr(addr), _tire_pressure(pressure),
+                                     _tire_temperature(temp),
+                                     _battery_voltage(convert_battery_voltage(bat)) {
+    _payload[0] = 0x00;
+    _payload[1] = 0x01;
+    _payload[2] = _mac_addr[5];
+    _payload[3] = _mac_addr[4];
+    _payload[4] = _mac_addr[3];
+    _payload[5] = _mac_addr[2];
+    _payload[6] = _mac_addr[1];
+    _payload[7] = _mac_addr[0];
+    memcpy(&_payload[8], &pressure, sizeof(pressure));
+    memcpy(&_payload[12], &temp, sizeof(temp));
+    _payload[16] = bat;
+    _payload[17] = 0x00;
+
+    _payload_span = mbed::make_const_Span(_payload);
+
+}
+
 
 TPMSScanner::TPMSScanner(BLE &ble) : _ble(ble) {
 }
@@ -52,7 +81,6 @@ void TPMSScanner::start(mbed::Callback<void(const TPMSPacket&)> cb) {
     }
 
     _cb = cb;
-
 
 }
 
@@ -110,7 +138,7 @@ void TPMSScanner::onAdvertisingReport(const ble::AdvertisingReportEvent &event)
             /* Check to see if the peer is a known BLE TPMS beacon */
             for (auto it = _tpms_macs.begin(); it != _tpms_macs.end(); ++it) {
                 if (addr == *it) {
-                    TPMSPacket packet(addr, field.value);
+                    TPMSPacket packet(field.value);
                     tr_info(
                             "(%02x:%02x:%02x:%02x:%02x:%02x) pressure: %lu Pa, temp: %02f C, battery voltage: %02f V",
                             addr[5], addr[4], addr[3], addr[2], addr[1],

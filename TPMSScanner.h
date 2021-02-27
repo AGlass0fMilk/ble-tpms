@@ -24,6 +24,8 @@
 #include "platform/Span.h"
 #include "platform/Callback.h"
 
+#include "drivers/Timeout.h"
+
 #include <list>
 #include <math.h>
 
@@ -61,9 +63,34 @@ public:
      */
     class TPMSPacket {
 
-        friend TPMSScanner;
-
     public:
+
+        /**
+         * Instantiate a TPMSPacket with the manufacturer data payload
+         * from scan results
+         *
+         * @param[in] manufacturer_data Manufacturer data payload from scan results
+         */
+        TPMSPacket(mbed::Span<const uint8_t> manufacturer_data);
+
+        /**
+         * Instantiate a TPMSPacket from given data. This constructor generates a formatted
+         * manufacturer payload based on the given input data.
+         *
+         * @param[in] addr MAC Address to put in payload
+         * @param[in] pressure Pressure to put in payload
+         * @param[in] temp Temperature to put in payload
+         * @param[in] bat Battery level to put in payload
+         */
+        TPMSPacket(ble::address_t addr, uint32_t pressure, int32_t temp, uint8_t bat);
+
+        /**
+         * Get the underlying payload in bytes
+         * @retval Span containing manufacturer specific payload
+         */
+        const mbed::Span<const uint8_t>& get_payload() const {
+            return _payload_span;
+        }
 
         float get_battery_voltage() const {
             return _battery_voltage;
@@ -81,21 +108,7 @@ public:
             return _tire_temperature;
         }
 
-
-
     protected:
-
-        /**
-         * Instantiate a TPMSPacket with the manufacturer data payload
-         * from scan results
-         *
-         * @param[in] addr MAC Address of TPMS beacon
-         * @param[in] manufacturer_data Manufacturer data payload from scan results
-         *
-         * TODO I think the manufacturer data includes the MAC address
-         * for some reason but we'll just pass it in separately for now
-         */
-        TPMSPacket(ble::address_t addr, mbed::Span<const uint8_t> manufacturer_data);
 
         /**
          * Converts the payload's battery voltage byte (BVB) to an actual voltage.
@@ -141,9 +154,46 @@ public:
     protected:
 
         ble::address_t _mac_addr;
+        uint8_t _payload[18];
         uint32_t _tire_pressure;
         int32_t _tire_temperature;
         float _battery_voltage;
+        mbed::Span<const uint8_t> _payload_span;
+    };
+
+protected:
+
+    /**
+     * Class encapsulating control block elements for nearby TPMS Beacon
+     */
+    class TPMSPeer {
+
+    public:
+
+        TPMSPeer(ble::address_t address);
+
+
+
+        volatile bool is_delay_expired() const {
+            return _delay_expired;
+        }
+
+    private:
+
+        ble::address_t _mac_addr;
+
+        /**
+         * Timeout to prevent retransmissions.
+         * The beacons send out packets periodically and the BLE scanner
+         * will often pick up several of them in quick succession.
+         *
+         * This timeout prevents duplicate packets from propagating
+         * to the rest of the application
+         */
+        mbed::Timeout _retransmit_timeout;
+
+        volatile bool _delay_expired = true;
+
     };
 
 public:
